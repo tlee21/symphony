@@ -351,6 +351,13 @@ Fields:
   - If `$VAR_NAME` resolves to an empty string, treat the key as missing.
 - `project_slug` (string)
   - Required for dispatch when `tracker.kind == "linear"`.
+- `assignee_email` (string)
+  - Optional.
+  - When present, only candidate issues currently assigned to that Linear user email are eligible
+    for dispatch.
+  - Unassigned issues do not match.
+  - This filter applies only to future dispatch polling and retry pickup, not to already-running
+    sessions.
 - `active_states` (list of strings or comma-separated string)
   - Default: `Todo`, `In Progress`
 - `terminal_states` (list of strings or comma-separated string)
@@ -1164,6 +1171,8 @@ Linear-specific requirements for `tracker.kind == "linear"`:
 - Auth token sent in `Authorization` header
 - `tracker.project_slug` maps to Linear project `slugId`
 - Candidate issue query filters project using `project: { slugId: { eq: $projectSlug } }`
+- Candidate issue query should additionally filter on `assignee.email` when `tracker.assignee_email`
+  is configured
 - Issue-state refresh query uses GraphQL issue IDs with variable type `[ID!]`
 - Pagination required for candidate issues
 - Page size default: `50`

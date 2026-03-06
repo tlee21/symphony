@@ -34,6 +34,11 @@ help with the setup:
 > Set up Symphony for my repository based on
 > https://github.com/openai/symphony/blob/main/elixir/README.md
 
+The Elixir implementation supports narrowing Linear pickup to a specific assignee email via
+`tracker.assignee_email` in `WORKFLOW.md`, using a server-side Linear filter so multiple Symphony
+instances can share one project while each instance only fetches issues assigned to its configured
+user.
+
 ---
 
 ## License

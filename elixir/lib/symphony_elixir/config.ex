@@ -54,6 +54,7 @@ defmodule SymphonyElixir.Config do
                                  api_key: [type: {:or, [:string, nil]}, default: nil],
                                  project_slug: [type: {:or, [:string, nil]}, default: nil],
                                  assignee: [type: {:or, [:string, nil]}, default: nil],
+                                 assignee_email: [type: {:or, [:string, nil]}, default: nil],
                                  active_states: [
                                    type: {:list, :string},
                                    default: @default_active_states
@@ -207,6 +208,11 @@ defmodule SymphonyElixir.Config do
     |> get_in([:tracker, :assignee])
     |> resolve_env_value(System.get_env("LINEAR_ASSIGNEE"))
     |> normalize_secret_value()
+  end
+
+  @spec linear_assignee_email() :: String.t() | nil
+  def linear_assignee_email do
+    get_in(validated_workflow_options(), [:tracker, :assignee_email])
   end
 
   @spec linear_active_states() :: [String.t()]
@@ -463,6 +469,8 @@ defmodule SymphonyElixir.Config do
     |> put_if_present(:endpoint, scalar_string_value(Map.get(section, "endpoint")))
     |> put_if_present(:api_key, binary_value(Map.get(section, "api_key"), allow_empty: true))
     |> put_if_present(:project_slug, scalar_string_value(Map.get(section, "project_slug")))
+    |> put_if_present(:assignee, scalar_string_value(Map.get(section, "assignee")))
+    |> put_if_present(:assignee_email, scalar_string_value(Map.get(section, "assignee_email")))
     |> put_if_present(:active_states, csv_value(Map.get(section, "active_states")))
     |> put_if_present(:terminal_states, csv_value(Map.get(section, "terminal_states")))
   end

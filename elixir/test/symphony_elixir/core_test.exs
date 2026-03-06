@@ -15,6 +15,7 @@ defmodule SymphonyElixir.CoreTest do
     assert Config.linear_active_states() == ["Todo", "In Progress"]
     assert Config.linear_terminal_states() == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     assert Config.linear_assignee() == nil
+    assert Config.linear_assignee_email() == nil
     assert Config.agent_max_turns() == 20
 
     write_workflow_file!(Workflow.workflow_file_path(), poll_interval_ms: "invalid")
@@ -130,6 +131,16 @@ defmodule SymphonyElixir.CoreTest do
     )
 
     assert Config.linear_assignee() == env_assignee
+  end
+
+  test "linear assignee email resolves from workflow config" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_assignee_email: "alice@company.com",
+      tracker_project_slug: "project",
+      codex_command: "/bin/sh app-server"
+    )
+
+    assert Config.linear_assignee_email() == "alice@company.com"
   end
 
   test "workflow file path defaults to WORKFLOW.md in the current working directory when app env is unset" do

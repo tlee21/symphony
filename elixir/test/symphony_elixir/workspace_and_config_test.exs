@@ -333,6 +333,76 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute issue.assigned_to_worker
   end
 
+  test "linear candidate fetch omits assignee email filter when not configured" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_assignee_email: nil)
+
+    request_fun = fn payload, _headers ->
+      refute payload["query"] =~ "assignee: {email: {eq: $assigneeEmail}}"
+      refute Map.has_key?(payload["variables"], :assigneeEmail)
+
+      {:ok,
+       %{
+         status: 200,
+         body: candidate_issue_page_response([
+           candidate_issue_node(%{"id" => "issue-email-1", "identifier" => "MT-201", "assignee" => nil})
+         ])
+       }}
+    end
+
+    assert {:ok, [%Issue{id: "issue-email-1", identifier: "MT-201"}]} =
+             Client.fetch_candidate_issues_for_test(request_fun)
+  end
+
+  test "linear candidate fetch applies server-side assignee email filter for matching assignee" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_assignee_email: "alice@company.com")
+
+    request_fun = fn payload, _headers ->
+      assert payload["query"] =~ "assignee: {email: {eq: $assigneeEmail}}"
+      assert payload["variables"][:assigneeEmail] == "alice@company.com"
+
+      {:ok,
+       %{
+         status: 200,
+         body: candidate_issue_page_response([
+           candidate_issue_node(%{
+             "id" => "issue-email-2",
+             "identifier" => "MT-202",
+             "assignee" => %{"id" => "user-4"}
+           })
+         ])
+       }}
+    end
+
+    assert {:ok, [%Issue{id: "issue-email-2", identifier: "MT-202"}]} =
+             Client.fetch_candidate_issues_for_test(request_fun)
+  end
+
+  test "linear candidate fetch excludes non-matching assignees through server-side filter" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_assignee_email: "alice@company.com")
+
+    request_fun = fn payload, _headers ->
+      assert payload["query"] =~ "assignee: {email: {eq: $assigneeEmail}}"
+      assert payload["variables"][:assigneeEmail] == "alice@company.com"
+
+      {:ok, %{status: 200, body: candidate_issue_page_response([])}}
+    end
+
+    assert {:ok, []} = Client.fetch_candidate_issues_for_test(request_fun)
+  end
+
+  test "linear candidate fetch excludes unassigned issues through server-side filter" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_assignee_email: "alice@company.com")
+
+    request_fun = fn payload, _headers ->
+      assert payload["query"] =~ "assignee: {email: {eq: $assigneeEmail}}"
+      assert payload["variables"][:assigneeEmail] == "alice@company.com"
+
+      {:ok, %{status: 200, body: candidate_issue_page_response([])}}
+    end
+
+    assert {:ok, []} = Client.fetch_candidate_issues_for_test(request_fun)
+  end
+
   test "linear client pagination merge helper preserves issue ordering" do
     issue_page_1 = [
       %Issue{id: "issue-1", identifier: "MT-1"},
@@ -881,5 +951,37 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), prompt: workflow_prompt)
     assert Config.workflow_prompt() == workflow_prompt
+  end
+
+  defp candidate_issue_page_response(nodes) when is_list(nodes) do
+    %{
+      "data" => %{
+        "issues" => %{
+          "nodes" => nodes,
+          "pageInfo" => %{"hasNextPage" => false, "endCursor" => nil}
+        }
+      }
+    }
+  end
+
+  defp candidate_issue_node(overrides) do
+    Map.merge(
+      %{
+        "id" => "issue-default",
+        "identifier" => "MT-DEFAULT",
+        "title" => "Candidate issue",
+        "description" => "Candidate description",
+        "priority" => 2,
+        "state" => %{"name" => "Todo"},
+        "branchName" => "mt-default",
+        "url" => "https://example.org/issues/MT-DEFAULT",
+        "assignee" => %{"id" => "user-default"},
+        "labels" => %{"nodes" => []},
+        "inverseRelations" => %{"nodes" => []},
+        "createdAt" => "2026-01-01T00:00:00Z",
+        "updatedAt" => "2026-01-02T00:00:00Z"
+      },
+      overrides
+    )
   end
 end

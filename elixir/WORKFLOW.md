@@ -2,6 +2,8 @@
 tracker:
   kind: linear
   project_slug: "symphony-0c79b11b75ea"
+  # Optional: restrict this Symphony instance to issues assigned to one Linear user.
+  # assignee_email: "alice@company.com"
   active_states:
     - Todo
     - In Progress

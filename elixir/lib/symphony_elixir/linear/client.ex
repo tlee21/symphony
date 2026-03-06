@@ -54,6 +54,51 @@ defmodule SymphonyElixir.Linear.Client do
   }
   """
 
+  @query_by_assignee_email """
+  query SymphonyLinearPollByAssigneeEmail($projectSlug: String!, $stateNames: [String!]!, $assigneeEmail: String!, $first: Int!, $relationFirst: Int!, $after: String) {
+    issues(filter: {project: {slugId: {eq: $projectSlug}}, state: {name: {in: $stateNames}}, assignee: {email: {eq: $assigneeEmail}}}, first: $first, after: $after) {
+      nodes {
+        id
+        identifier
+        title
+        description
+        priority
+        state {
+          name
+        }
+        branchName
+        url
+        assignee {
+          id
+        }
+        labels {
+          nodes {
+            name
+          }
+        }
+        inverseRelations(first: $relationFirst) {
+          nodes {
+            type
+            issue {
+              id
+              identifier
+              state {
+                name
+              }
+            }
+          }
+        }
+        createdAt
+        updatedAt
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+  """
+
   @query_by_ids """
   query SymphonyLinearIssuesById($ids: [ID!]!, $first: Int!, $relationFirst: Int!) {
     issues(filter: {id: {in: $ids}}, first: $first) {
@@ -115,8 +160,9 @@ defmodule SymphonyElixir.Linear.Client do
         {:error, :missing_linear_project_slug}
 
       true ->
-        with {:ok, assignee_filter} <- routing_assignee_filter() do
-          do_fetch_by_states(project_slug, Config.linear_active_states(), assignee_filter)
+        with {:ok, assignee_filter} <- routing_assignee_filter(),
+             {:ok, assignee_email} <- candidate_assignee_email_filter() do
+          do_fetch_by_states(project_slug, Config.linear_active_states(), assignee_filter, assignee_email)
         end
     end
   end
@@ -138,7 +184,7 @@ defmodule SymphonyElixir.Linear.Client do
           {:error, :missing_linear_project_slug}
 
         true ->
-          do_fetch_by_states(project_slug, normalized_states, nil)
+          do_fetch_by_states(project_slug, normalized_states, nil, nil)
       end
     end
   end
@@ -191,19 +237,7 @@ defmodule SymphonyElixir.Linear.Client do
   @doc false
   @spec normalize_issue_for_test(map(), String.t() | nil) :: Issue.t() | nil
   def normalize_issue_for_test(issue, assignee) when is_map(issue) do
-    assignee_filter =
-      case assignee do
-        value when is_binary(value) ->
-          case build_assignee_filter(value) do
-            {:ok, filter} -> filter
-            {:error, _reason} -> nil
-          end
-
-        _ ->
-          nil
-      end
-
-    normalize_issue(issue, assignee_filter)
+    normalize_issue(issue, test_routing_assignee_filter(assignee))
   end
 
   @doc false
@@ -218,25 +252,50 @@ defmodule SymphonyElixir.Linear.Client do
     |> finalize_paginated_issues()
   end
 
-  defp do_fetch_by_states(project_slug, state_names, assignee_filter) do
-    do_fetch_by_states_page(project_slug, state_names, assignee_filter, nil, [])
+  @doc false
+  @spec fetch_candidate_issues_for_test((map(), list() -> {:ok, map()} | {:error, term()})) ::
+          {:ok, [Issue.t()]} | {:error, term()}
+  def fetch_candidate_issues_for_test(request_fun) when is_function(request_fun, 2) do
+    project_slug = Config.linear_project_slug()
+
+    with {:ok, assignee_filter} <- routing_assignee_filter(),
+         {:ok, assignee_email} <- candidate_assignee_email_filter() do
+      do_fetch_by_states(project_slug, Config.linear_active_states(), assignee_filter, assignee_email, request_fun)
+    end
   end
 
-  defp do_fetch_by_states_page(project_slug, state_names, assignee_filter, after_cursor, acc_issues) do
+  defp do_fetch_by_states(project_slug, state_names, assignee_filter, assignee_email, request_fun \\ &post_graphql_request/2) do
+    do_fetch_by_states_page(project_slug, state_names, assignee_filter, assignee_email, nil, [], request_fun)
+  end
+
+  defp do_fetch_by_states_page(
+         project_slug,
+         state_names,
+         assignee_filter,
+         assignee_email,
+         after_cursor,
+         acc_issues,
+         request_fun
+       ) do
+    {query, variables} =
+      build_candidate_query(project_slug, state_names, assignee_email, after_cursor)
+
     with {:ok, body} <-
-           graphql(@query, %{
-             projectSlug: project_slug,
-             stateNames: state_names,
-             first: @issue_page_size,
-             relationFirst: @issue_page_size,
-             after: after_cursor
-           }),
+           graphql(query, variables, request_fun: request_fun),
          {:ok, issues, page_info} <- decode_linear_page_response(body, assignee_filter) do
       updated_acc = prepend_page_issues(issues, acc_issues)
 
       case next_page_cursor(page_info) do
         {:ok, next_cursor} ->
-          do_fetch_by_states_page(project_slug, state_names, assignee_filter, next_cursor, updated_acc)
+          do_fetch_by_states_page(
+            project_slug,
+            state_names,
+            assignee_filter,
+            assignee_email,
+            next_cursor,
+            updated_acc,
+            request_fun
+          )
 
         :done ->
           {:ok, finalize_paginated_issues(updated_acc)}
@@ -441,6 +500,16 @@ defmodule SymphonyElixir.Linear.Client do
     end
   end
 
+  defp candidate_assignee_email_filter do
+    case Config.linear_assignee_email() do
+      nil ->
+        {:ok, nil}
+
+      assignee_email ->
+        {:ok, normalize_assignee_email_match_value(assignee_email)}
+    end
+  end
+
   defp build_assignee_filter(assignee) when is_binary(assignee) do
     case normalize_assignee_match_value(assignee) do
       nil ->
@@ -450,7 +519,7 @@ defmodule SymphonyElixir.Linear.Client do
         resolve_viewer_assignee_filter()
 
       normalized ->
-        {:ok, %{configured_assignee: assignee, match_values: MapSet.new([normalized])}}
+        {:ok, %{match_values: MapSet.new([normalized])}}
     end
   end
 
@@ -462,7 +531,7 @@ defmodule SymphonyElixir.Linear.Client do
             {:error, :missing_linear_viewer_identity}
 
           viewer_id ->
-            {:ok, %{configured_assignee: "me", match_values: MapSet.new([viewer_id])}}
+            {:ok, %{match_values: MapSet.new([viewer_id])}}
         end
 
       {:ok, _body} ->
@@ -481,6 +550,51 @@ defmodule SymphonyElixir.Linear.Client do
   end
 
   defp normalize_assignee_match_value(_value), do: nil
+
+  defp normalize_assignee_email_match_value(value) when is_binary(value) do
+    case value |> String.trim() |> String.downcase() do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_assignee_email_match_value(_value), do: nil
+
+  defp test_routing_assignee_filter(assignee) do
+    case assignee do
+      value when is_binary(value) ->
+        case build_assignee_filter(value) do
+          {:ok, filter} -> filter
+          {:error, _reason} -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp build_candidate_query(project_slug, state_names, nil, after_cursor) do
+    {@query,
+     %{
+       projectSlug: project_slug,
+       stateNames: state_names,
+       first: @issue_page_size,
+       relationFirst: @issue_page_size,
+       after: after_cursor
+     }}
+  end
+
+  defp build_candidate_query(project_slug, state_names, assignee_email, after_cursor) do
+    {@query_by_assignee_email,
+     %{
+       projectSlug: project_slug,
+       stateNames: state_names,
+       assigneeEmail: assignee_email,
+       first: @issue_page_size,
+       relationFirst: @issue_page_size,
+       after: after_cursor
+     }}
+  end
 
   defp extract_labels(%{"labels" => %{"nodes" => labels}}) when is_list(labels) do
     labels

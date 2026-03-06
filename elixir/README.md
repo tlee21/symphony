@@ -90,6 +90,7 @@ Minimal example:
 tracker:
   kind: linear
   project_slug: "..."
+  assignee_email: "alice@company.com"
 workspace:
   root: ~/code/workspaces
 hooks:
@@ -110,6 +111,10 @@ Title: {{ issue.title }} Body: {{ issue.description }}
 Notes:
 
 - If a value is missing, defaults are used.
+- `tracker.assignee_email` is optional. When set, Symphony adds a server-side Linear candidate
+  filter so only issues whose current assignee email matches that value are fetched for dispatch.
+  Unassigned issues do not match, and already-running sessions are not interrupted if the issue is
+  reassigned later.
 - Safer Codex defaults are used when policy fields are omitted:
   - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
   - `codex.thread_sandbox` defaults to `workspace-write`
@@ -127,6 +132,8 @@ Notes:
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
+- Multiple Symphony instances can share the same Linear project by giving each workflow a different
+  `tracker.assignee_email`.
 - For path values, `~` is expanded to the home directory.
 - For env-backed path values, use `$VAR`. `workspace.root` resolves `$VAR` before path handling,
   while `codex.command` stays a shell command string and any `$VAR` expansion there happens in the
